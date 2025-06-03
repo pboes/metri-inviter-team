@@ -7,7 +7,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist --repo git@github.com:shorn-gnosis/ticket-validator.git"
+    "deploy": "gh-pages -d dist --repo git@github.com:aboutcircles/ticket-validator-team.git"
   },
   "dependencies": {
     "@babel/runtime": "^7.27.0",
@@ -27,5 +27,5 @@
     "typescript": "^5.3.3",
     "vite": "^6.2.4"
   },
-  "homepage": "https://shorn-gnosis.github.io/ticket-validator"
+  "homepage": "https://aboutcircles.github.io/ticket-validator-team"
 }
