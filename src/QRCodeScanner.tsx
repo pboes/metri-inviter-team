@@ -157,13 +157,25 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({
       try {
         console.log("Requesting camera permission...");
 
-        // Force the audio: false and video: true constraint format
-        await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: true,
-        });
+        // First, try to directly access the back camera
+        try {
+          await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: "environment" },
+          });
+          console.log("Successfully requested environment-facing camera");
+        } catch (err) {
+          console.log(
+            "Couldn't access environment camera directly, falling back to general permission",
+          );
+          // Fall back to general camera permission
+          await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          });
+        }
 
-        // Then get list of available devices
+        // Get the list of available devices
         const devices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = devices.filter(
           (device) => device.kind === "videoinput",
@@ -183,9 +195,95 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({
           );
         });
 
-        // Just select the first camera for now
-        setSelectedDeviceId(videoDevices[0].deviceId);
-        setCameraReady(true);
+        // Smart camera selection that prioritizes back cameras
+        let selectedCamera = null;
+
+        // Priority 1: Find any camera with "back" in the name (most reliable method)
+        const backCamera = videoDevices.find((device) => {
+          const label = device.label.toLowerCase();
+          return label.includes("back");
+        });
+
+        if (backCamera) {
+          selectedCamera = backCamera;
+          console.log(
+            "Selected camera with 'back' in name:",
+            selectedCamera.label,
+          );
+        }
+
+        // Priority 2: Find camera with related terms like "rear" or "environment"
+        if (!selectedCamera) {
+          const alternativeBackCamera = videoDevices.find((device) => {
+            const label = device.label.toLowerCase();
+            return label.includes("rear") || label.includes("environment");
+          });
+
+          if (alternativeBackCamera) {
+            selectedCamera = alternativeBackCamera;
+            console.log(
+              "Selected camera with 'rear' or 'environment' in name:",
+              selectedCamera.label,
+            );
+          }
+        }
+
+        // Priority 3: Use device-specific heuristics for mobile and tablets
+        if (!selectedCamera) {
+          const isMobileOrTablet =
+            /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+              navigator.userAgent,
+            );
+          const isIPad = /iPad/i.test(navigator.userAgent);
+
+          if (isMobileOrTablet) {
+            // On most mobile devices with exactly 2 cameras
+            if (videoDevices.length === 2) {
+              // For most Android and iOS devices, the back camera is index 1 (second camera)
+              selectedCamera = videoDevices[1];
+              console.log(
+                "Mobile device with 2 cameras - selected second camera (likely back):",
+                selectedCamera.label,
+              );
+            }
+            // For devices with more than 2 cameras (modern phones often have multiple back cameras)
+            else if (videoDevices.length > 2) {
+              // Try the second camera first (most common for the main back camera)
+              selectedCamera = videoDevices[1];
+              console.log(
+                "Mobile device with multiple cameras - selected camera at index 1:",
+                selectedCamera.label,
+              );
+            }
+          }
+
+          // Special case for iPad, which might have different camera ordering
+          if (isIPad && videoDevices.length >= 2) {
+            // On iPad, the back camera is typically at index 1
+            selectedCamera = videoDevices[1];
+            console.log(
+              "iPad detected - selected camera at index 1:",
+              selectedCamera.label,
+            );
+          }
+        }
+
+        // Final fallback: If no back camera found with any method, use the first camera
+        if (!selectedCamera && videoDevices.length > 0) {
+          selectedCamera = videoDevices[0];
+          console.log(
+            "No back camera identified, defaulting to first camera:",
+            selectedCamera.label,
+          );
+        }
+
+        // Set the selected device
+        if (selectedCamera) {
+          setSelectedDeviceId(selectedCamera.deviceId);
+          setCameraReady(true);
+        } else {
+          throw new Error("Could not determine an appropriate camera to use");
+        }
       } catch (error) {
         console.error("Error getting camera devices:", error);
         setError(
