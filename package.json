@@ -7,7 +7,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist --repo git@github.com:aboutcircles/ticket-validator-team.git"
+    "deploy": "gh-pages -d dist --repo https://github.com/aboutcircles/ticket-validator-team.git"
   },
   "dependencies": {
     "@babel/runtime": "^7.27.0",
