@@ -90,10 +90,7 @@ function App() {
   }, []);
 
   // Function to fetch trusted groups from the RPC
-  const fetchTrustedGroups = async (
-    trusterAddress: string,
-    rpcProvider: ethers.Provider,
-  ) => {
+  const fetchTrustedGroups = async (trusterAddress: string) => {
     const rpcEndpoint = GNOSIS_RPC_URL;
     const requestBody = {
       jsonrpc: "2.0",
@@ -194,10 +191,7 @@ function App() {
     setLoadingGroups(true);
     try {
       // Fetch trusted groups from the truster (Circles organization)
-      const trustedGroups = await fetchTrustedGroups(
-        DEFAULT_SAFE_ADDRESS,
-        rpcProvider,
-      );
+      const trustedGroups = await fetchTrustedGroups(DEFAULT_SAFE_ADDRESS);
 
       if (trustedGroups.length === 0) {
         // If no trusted groups found, add a fallback group
