@@ -4,13 +4,19 @@ import "./App.css";
 import QRCodeScanner from "./QRCodeScanner";
 import { createSafeClient } from "@safe-global/sdk-starter-kit";
 
-// Hardcoded addresses
-const GROUP_CONTRACT_ADDRESS = "0xeb614ef61367687704cd4628a68a02f3b10ce68c";
-const DEFAULT_SAFE_ADDRESS = "0x0aFd8899bca011Bb95611409f09c8EFbf6b169cF";
+// Define group structure with owner property
+interface Group {
+  id: string;
+  name: string;
+  address: string;
+  owner?: string;
+}
 
 // Gnosis Chain configuration
 const GNOSIS_CHAIN_ID = 100;
-const GNOSIS_RPC_URL = "https://rpc.gnosischain.com";
+const GNOSIS_RPC_URL = "https://rpc.aboutcircles.com";
+const DEFAULT_SAFE_ADDRESS =
+  "0x0aFd8899bca011Bb95611409f09c8EFbf6b169cF".toLowerCase();
 
 // Minimal ABI with just what we need
 const GROUP_ABI = [
@@ -25,21 +31,30 @@ const SAFE_ABI = [
 ];
 
 // Define our operating modes
-type OperatingMode = "scan-only" | "auto-tally" | "auto-group";
+type Tab = "invite" | "group";
 type OwnerMode = "direct" | "safe";
 
 function App() {
+  // Basic state
   const [walletAddress, setWalletAddress] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
-  // const [tallyUrl, setTallyUrl] = useState<string | null>(null);
   const [provider, setProvider] = useState<ethers.Provider | null>(null);
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
   const [walletConnected, setWalletConnected] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [scannedAddress, setScannedAddress] = useState<string | null>(null);
-  const [mode, setMode] = useState<OperatingMode>("scan-only");
+
+  // Tab and mode states
+  const [activeTab, setActiveTab] = useState<Tab>("invite");
+  const [autoInvite, setAutoInvite] = useState(false);
+  const [autoGroup, setAutoGroup] = useState(false);
+
+  // Group and ownership states
+  const [availableGroups, setAvailableGroups] = useState<Group[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  const [loadingGroups, setLoadingGroups] = useState(false);
   const [ownerMode, setOwnerMode] = useState<OwnerMode>("direct");
   const [processingGroup, setProcessingGroup] = useState(false);
   const [processingTally, setProcessingTally] = useState(false);
@@ -47,9 +62,10 @@ function App() {
   const [isDirectOwner, setIsDirectOwner] = useState(false);
   const [isSafeOwner, setIsSafeOwner] = useState(false);
   const [isSafeGroupOwner, setIsSafeGroupOwner] = useState(false);
-  // const [currentNetworkId, setCurrentNetworkId] = useState<number | null>(null);
   const [isCorrectNetwork, setIsCorrectNetwork] = useState(false);
   const [safeThreshold, setSafeThreshold] = useState<number>(1);
+
+  // Safe client
   const [safeClient, setSafeClient] = useState<any>(null);
   const [walletEip1193Provider, setWalletEip1193Provider] = useState<any>(null);
 
@@ -60,20 +76,194 @@ function App() {
     }
   }, []);
 
-  // Initialize an explicit fallback provider for Gnosis Chain
+  // Initialize RPC provider regardless of wallet connection
   useEffect(() => {
-    const initFallbackProvider = () => {
-      // Create a direct provider to Gnosis Chain
-      const fallbackProvider = new ethers.JsonRpcProvider(GNOSIS_RPC_URL);
-      setProvider(fallbackProvider);
-      console.log("Using fallback Gnosis Chain provider");
+    const initRpcProvider = () => {
+      const rpcProvider = new ethers.JsonRpcProvider(GNOSIS_RPC_URL);
+      setProvider(rpcProvider);
+      return rpcProvider;
     };
 
-    // Use this as a fallback if MetaMask isn't on Gnosis Chain
-    if (!isCorrectNetwork) {
-      initFallbackProvider();
+    // Initialize provider and fetch groups
+    const provider = initRpcProvider();
+    fetchGroupsData(provider);
+  }, []);
+
+  // Function to fetch trusted groups from the RPC
+  const fetchTrustedGroups = async (
+    trusterAddress: string,
+    rpcProvider: ethers.Provider,
+  ) => {
+    const rpcEndpoint = GNOSIS_RPC_URL;
+    const requestBody = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "circles_query",
+      params: [
+        {
+          Namespace: "V_CrcV2",
+          Table: "TrustRelations",
+          Columns: [],
+          Filter: [
+            {
+              Type: "FilterPredicate",
+              FilterType: "Equals",
+              Column: "truster",
+              Value: trusterAddress,
+            },
+          ],
+        },
+      ],
+    };
+
+    try {
+      const response = await fetch(rpcEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(`RPC error: ${data.error.message}`);
+      }
+
+      // Extract unique trustee addresses from the rows (trustee is at index 5)
+      const addresses = new Set(data.result.rows.map((row: any[]) => row[5]));
+      return Array.from(addresses) as string[];
+    } catch (error) {
+      console.error("Error fetching trusted groups:", error);
+      return [];
     }
-  }, [isCorrectNetwork]);
+  };
+
+  // Function to get profile name from Circles API
+  const getProfileName = async (address: string): Promise<string> => {
+    try {
+      const queryAddress = address.toLowerCase();
+      const url = `https://rpc.aboutcircles.com/profiles/search?address=${queryAddress}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error("HTTP error", response.status, response.statusText);
+        return "Unnamed Group";
+      }
+
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        const profile = data.find(
+          (entry) => entry.address.toLowerCase() === queryAddress,
+        );
+        return profile?.name || "Unnamed Group";
+      }
+      return "Unnamed Group";
+    } catch (error) {
+      console.error("Error fetching profile for", address, error);
+      return "Unnamed Group";
+    }
+  };
+
+  // Function to get owner address from group contract
+  const getGroupOwner = async (
+    groupAddress: string,
+    rpcProvider: ethers.Provider,
+  ): Promise<string> => {
+    try {
+      const groupContract = new ethers.Contract(
+        groupAddress,
+        GROUP_ABI,
+        rpcProvider,
+      );
+
+      const ownerAddress = await groupContract.owner();
+      return ownerAddress;
+    } catch (error) {
+      console.error("Error getting group owner:", error);
+      return DEFAULT_SAFE_ADDRESS; // Fallback to default Safe address
+    }
+  };
+
+  // Fetch all groups data
+  const fetchGroupsData = async (rpcProvider: ethers.Provider) => {
+    setLoadingGroups(true);
+    try {
+      // Fetch trusted groups from the truster (Circles organization)
+      const trustedGroups = await fetchTrustedGroups(
+        DEFAULT_SAFE_ADDRESS,
+        rpcProvider,
+      );
+
+      if (trustedGroups.length === 0) {
+        // If no trusted groups found, add a fallback group
+        setAvailableGroups([
+          {
+            id: "default-group",
+            name: "Default Circles Group",
+            address: "0xeb614ef61367687704cd4628a68a02f3b10ce68c",
+            owner: DEFAULT_SAFE_ADDRESS,
+          },
+        ]);
+        setSelectedGroup({
+          id: "default-group",
+          name: "Default Circles Group",
+          address: "0xeb614ef61367687704cd4628a68a02f3b10ce68c",
+          owner: DEFAULT_SAFE_ADDRESS,
+        });
+        return;
+      }
+
+      // Process each group to get name and owner
+      const groupsWithDetails = await Promise.all(
+        trustedGroups.map(async (address, index) => {
+          // Get the group owner
+          const owner = await getGroupOwner(address, rpcProvider);
+
+          // Get the group name from profile
+          const name = await getProfileName(address);
+
+          return {
+            id: `group-${index}`,
+            name: name || `Group ${index + 1}`,
+            address: address,
+            owner: owner,
+          };
+        }),
+      );
+
+      setAvailableGroups(groupsWithDetails);
+
+      // Set the first group as selected by default
+      if (groupsWithDetails.length > 0) {
+        setSelectedGroup(groupsWithDetails[0]);
+        setSafeAddress(groupsWithDetails[0].owner || DEFAULT_SAFE_ADDRESS);
+      }
+    } catch (error) {
+      console.error("Error fetching groups data:", error);
+      // Set fallback group
+      setAvailableGroups([
+        {
+          id: "default-group",
+          name: "Default Circles Group",
+          address: "0xeb614ef61367687704cd4628a68a02f3b10ce68c",
+          owner: DEFAULT_SAFE_ADDRESS,
+        },
+      ]);
+      setSelectedGroup({
+        id: "default-group",
+        name: "Default Circles Group",
+        address: "0xeb614ef61367687704cd4628a68a02f3b10ce68c",
+        owner: DEFAULT_SAFE_ADDRESS,
+      });
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
 
   // Initialize Safe SDK when wallet is connected and on correct network
   useEffect(() => {
@@ -82,29 +272,17 @@ function App() {
         walletConnected &&
         isCorrectNetwork &&
         walletEip1193Provider &&
-        ownerMode === "safe"
+        ownerMode === "safe" &&
+        !safeClient // Only initialize if not already initialized
       ) {
         try {
-          // Reset any existing safe client
-          setSafeClient(null);
-
           // Get the connected wallet address
           const connectedAddress = await signer?.getAddress();
           if (!connectedAddress) {
             throw new Error("Could not get connected wallet address");
           }
 
-          setErrorInfo("Initializing Safe client...");
-          console.log("Initializing Safe client with:", {
-            provider: walletEip1193Provider,
-            signer: connectedAddress,
-            safeAddress: safeAddress,
-          });
-
           // Create Safe Client with correct parameters
-          // provider: window.ethereum (EIP-1193 provider)
-          // signer: connected wallet address (as hex string)
-          // safeAddress: the Safe address
           const client = await createSafeClient({
             provider: walletEip1193Provider,
             signer: connectedAddress,
@@ -113,7 +291,6 @@ function App() {
 
           setSafeClient(client);
           setErrorInfo(null);
-          console.log("Safe client initialized successfully");
         } catch (error) {
           console.error("Failed to initialize Safe client:", error);
           setSafeClient(null);
@@ -121,12 +298,12 @@ function App() {
             `Failed to initialize Safe client: ${(error as Error).message}`,
           );
         }
-      } else {
-        setSafeClient(null);
       }
     };
 
-    initSafeClient();
+    if (ownerMode === "safe") {
+      initSafeClient();
+    }
   }, [
     walletConnected,
     isCorrectNetwork,
@@ -134,36 +311,38 @@ function App() {
     safeAddress,
     ownerMode,
     walletEip1193Provider,
+    safeClient,
   ]);
 
-  // Check ownership statuses whenever wallet connection or mode changes
+  // Update Safe address when group changes (if it has an owner)
   useEffect(() => {
-    if (provider) {
+    if (selectedGroup && selectedGroup.owner) {
+      setSafeAddress(selectedGroup.owner);
+    }
+  }, [selectedGroup]);
+
+  // Check ownership statuses whenever selected group, wallet connection or mode changes
+  useEffect(() => {
+    if (provider && selectedGroup) {
       checkOwnershipStatuses();
     }
-  }, [walletConnected, ownerMode, safeAddress, provider]);
+  }, [walletConnected, ownerMode, safeAddress, provider, selectedGroup]);
 
   // Function to check all ownership statuses
   const checkOwnershipStatuses = async () => {
-    if (!provider) return;
+    if (!provider || !selectedGroup) return;
 
     try {
       // Create contract instance using the fallback provider if needed
       const groupContract = new ethers.Contract(
-        GROUP_CONTRACT_ADDRESS,
+        selectedGroup.address,
         GROUP_ABI,
         provider,
-      );
-
-      console.log(
-        "Attempting to call owner() function on contract:",
-        GROUP_CONTRACT_ADDRESS,
       );
 
       // Try to get the owner with a direct call
       try {
         const ownerAddress = await groupContract.owner();
-        console.log("Group owner address:", ownerAddress);
 
         // If we're using a wallet, check if it's the owner
         if (signer) {
@@ -193,7 +372,6 @@ function App() {
             // Also get the threshold for the Safe
             const threshold = await safeContract.getThreshold();
             setSafeThreshold(Number(threshold));
-            console.log("Safe threshold:", threshold.toString());
           } catch (error) {
             console.error("Error checking Safe ownership:", error);
             setIsSafeOwner(false);
@@ -226,7 +404,6 @@ function App() {
             method: "eth_chainId",
           });
           const networkId = parseInt(chainId, 16);
-          // setCurrentNetworkId(networkId);
           setIsCorrectNetwork(networkId === GNOSIS_CHAIN_ID);
 
           // Setup provider based on network
@@ -237,9 +414,6 @@ function App() {
           } else {
             // Use direct RPC provider if on wrong network
             ethersProvider = new ethers.JsonRpcProvider(GNOSIS_RPC_URL);
-            console.warn(
-              "Wallet is connected to the wrong network. Using direct Gnosis Chain provider for read operations.",
-            );
           }
 
           setProvider(ethersProvider);
@@ -302,15 +476,9 @@ function App() {
           });
         } catch (addError) {
           console.error("Failed to add Gnosis Chain to wallet:", addError);
-          setErrorInfo(
-            "Failed to add Gnosis Chain to your wallet. Please add it manually.",
-          );
         }
       } else {
         console.error("Failed to switch to Gnosis Chain:", switchError);
-        setErrorInfo(
-          "Failed to switch to Gnosis Chain. Please switch manually.",
-        );
       }
     }
   };
@@ -337,7 +505,6 @@ function App() {
       const networkId = parseInt(chainId, 16);
 
       if (networkId !== GNOSIS_CHAIN_ID) {
-        setErrorInfo("Please switch to Gnosis Chain to use this app.");
         await switchToGnosisChain();
         return;
       }
@@ -366,9 +533,8 @@ function App() {
     try {
       const baseUrl = "https://tally.so/r/wv1k10";
       const fullUrl = `${baseUrl}?address=${encodeURIComponent(address)}`;
-      // setTallyUrl(fullUrl);
 
-      // Open the URL in a new tab
+      // Always open the URL in a new tab when the button is clicked
       window.open(fullUrl, "_blank");
 
       return fullUrl;
@@ -382,6 +548,8 @@ function App() {
 
   // Function to add address to group directly
   const addToGroupDirect = async (address: string) => {
+    if (!selectedGroup) return;
+
     setErrorInfo(null);
     setTxHash(null);
 
@@ -401,7 +569,7 @@ function App() {
 
       // Create contract instance
       const groupContract = new ethers.Contract(
-        GROUP_CONTRACT_ADDRESS,
+        selectedGroup.address,
         GROUP_ABI,
         signer,
       );
@@ -430,6 +598,8 @@ function App() {
 
   // Function to add address to group via Safe using the SDK Starter Kit
   const addToGroupViaSafe = async (address: string) => {
+    if (!selectedGroup) return;
+
     setErrorInfo(null);
     setTxHash(null);
 
@@ -451,7 +621,6 @@ function App() {
 
     try {
       setProcessingGroup(true);
-      setErrorInfo("Creating Safe transaction...");
 
       // Create the transaction data for the group contract call
       const groupInterface = new ethers.Interface(GROUP_ABI);
@@ -467,19 +636,14 @@ function App() {
       // Create the transaction object for the Safe SDK
       const transactions = [
         {
-          to: GROUP_CONTRACT_ADDRESS,
+          to: selectedGroup.address,
           data: txData,
           value: "0",
         },
       ];
 
-      // Use the Safe client to send the transaction
-      setErrorInfo("Sending Safe transaction...");
-      console.log("Sending transaction:", transactions);
-
       // Execute the transaction
       const txResult = await safeClient.send({ transactions });
-      console.log("Transaction result:", txResult);
 
       // For threshold=1, the transaction should be executed immediately
       if (txResult.transaction?.transactionHash) {
@@ -490,7 +654,7 @@ function App() {
       else if (txResult.transaction?.safeTxHash) {
         setTxHash(null);
         setErrorInfo(
-          `Transaction created with Safe TX hash: ${txResult.transaction.safeTxHash}. This Safe requires ${safeThreshold} signatures. Please use the Safe web app to execute it once all signatures are collected.`,
+          `Transaction created with Safe TX hash: ${txResult.transaction.safeTxHash}. This Safe requires ${safeThreshold} signatures.`,
         );
 
         // Open the Safe web app for the user to view and manage the transaction
@@ -544,10 +708,10 @@ function App() {
     setShowScanner(false);
     setErrorInfo(null);
 
-    // Auto-execute based on mode
-    if (mode === "auto-tally") {
+    // Auto-execute based on active tab and its toggle
+    if (activeTab === "invite" && autoInvite) {
       createTallyUrl(address);
-    } else if (mode === "auto-group" && walletConnected && isCorrectNetwork) {
+    } else if (activeTab === "group" && autoGroup && canAddToGroup()) {
       addToGroup(address);
     }
   };
@@ -559,7 +723,6 @@ function App() {
   const handleOpenScanner = () => {
     // Reset any previous errors and data
     setErrorInfo(null);
-    // setTallyUrl(null);
     setTxHash(null);
     setScannedAddress(null);
     setShowScanner(true);
@@ -579,12 +742,13 @@ function App() {
     }
   };
 
-  // Function to update Safe address
-  const handleSafeAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setSafeAddress(value);
-    // Reset Safe client when changing address
-    setSafeClient(null);
+  // Handle group selection change
+  const handleGroupChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedId = e.target.value;
+    const group = availableGroups.find((g) => g.id === selectedId);
+    if (group) {
+      setSelectedGroup(group);
+    }
   };
 
   // Get current status text based on ownership status
@@ -623,6 +787,7 @@ function App() {
   const canAddToGroup = () => {
     if (!walletConnected) return false;
     if (!isCorrectNetwork) return false;
+    if (!selectedGroup) return false;
 
     if (ownerMode === "safe") {
       return !!safeClient && isSafeOwner && isSafeGroupOwner;
@@ -631,145 +796,228 @@ function App() {
     return true;
   };
 
-  return (
-    <div className="App">
-      <h1>Metri Wallet Connector</h1>
-
-      {/* Network Status */}
-      {walletConnected && !isCorrectNetwork && (
-        <div className="network-warning mb-6">
-          <p>⚠️ Your wallet is not connected to Gnosis Chain</p>
-          <button
-            onClick={switchToGnosisChain}
-            className="switch-network-button mt-2"
-          >
-            Switch to Gnosis Chain
-          </button>
-        </div>
-      )}
-
-      {/* Owner Mode Toggle */}
-      <div className="owner-mode-toggle mb-6">
-        <h2 className="text-xl mb-4">Owner Type</h2>
-        <div className="flex justify-center gap-4">
-          <button
-            className={`mode-button ${ownerMode === "direct" ? "active" : ""}`}
-            onClick={() => setOwnerMode("direct")}
-          >
-            Direct Owner
-          </button>
-          <button
-            className={`mode-button ${ownerMode === "safe" ? "active" : ""}`}
-            onClick={() => setOwnerMode("safe")}
-          >
-            Safe Owner
-          </button>
-        </div>
-      </div>
-
-      {/* Safe Address Input (only visible in Safe mode) */}
-      {ownerMode === "safe" && (
-        <div className="safe-address-container mb-6">
-          <input
-            type="text"
-            placeholder="Safe Address (0x...)"
-            value={safeAddress}
-            onChange={handleSafeAddressChange}
-            className="wallet-input"
-          />
-          {walletConnected && isCorrectNetwork && (
-            <p className="text-sm text-center mt-2">
-              {safeClient
-                ? "✓ Safe client initialized"
-                : "⚠️ Safe client not initialized"}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Ownership Status */}
-      {walletConnected && (
-        <div
-          className={`ownership-status mb-6 ${
-            !isCorrectNetwork
-              ? "warning"
-              : canAddToGroup()
-                ? "success"
-                : "error"
-          }`}
-        >
-          {getOwnershipStatusText()}
-        </div>
-      )}
-
-      {/* Mode Selection - Simplified to 3 options */}
-      <div className="mode-selection mb-6">
-        <h2 className="text-xl mb-4">Action Mode</h2>
-        <div className="flex justify-center gap-4">
-          <button
-            className={`mode-button ${mode === "scan-only" ? "active" : ""}`}
-            onClick={() => setMode("scan-only")}
-          >
-            Scan Only
-          </button>
-          <button
-            className={`mode-button ${mode === "auto-tally" ? "active" : ""}`}
-            onClick={() => setMode("auto-tally")}
-          >
-            Auto-Tally
-          </button>
-          <button
-            className={`mode-button ${mode === "auto-group" ? "active" : ""}`}
-            onClick={() => setMode("auto-group")}
-          >
-            Auto-Group
-          </button>
-        </div>
-      </div>
-
-      {/* Wallet Connection - Always Visible */}
-      <div className="wallet-connection mb-6">
-        {walletConnected ? (
-          <div className="text-center">
-            <p className="text-green-600 font-bold">✓ Wallet Connected</p>
-            <p className="text-sm text-gray-600">
-              {isCorrectNetwork
-                ? "Connected to Gnosis Chain"
-                : "Not connected to Gnosis Chain"}
-            </p>
+  // Render the Invite Tab Content
+  const renderInviteTab = () => {
+    return (
+      <div className="tab-content">
+        <div className="auto-toggle-container">
+          <div className="auto-execute-toggle">
+            <span className="toggle-label">Auto-Invite:</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={autoInvite}
+                onChange={() => setAutoInvite(!autoInvite)}
+              />
+              <span className="toggle-slider"></span>
+            </label>
           </div>
-        ) : (
-          <button
-            onClick={connectWallet}
-            disabled={isLoading}
-            className="connect-wallet-button"
-          >
-            {isLoading ? "Connecting..." : "Connect Wallet"}
-          </button>
+        </div>
+
+        {scannedAddress && (
+          <div className="address-display">
+            <div className="action-buttons-container">
+              <button
+                onClick={() => createTallyUrl(scannedAddress)}
+                className="action-button tally-button"
+                disabled={processingTally}
+              >
+                {processingTally ? "Opening..." : "Open Invitation Form"}
+              </button>
+            </div>
+          </div>
         )}
       </div>
+    );
+  };
 
-      {showScanner ? (
-        <>
-          <QRCodeScanner
-            onScan={handleScan}
-            onClose={handleCloseScanner}
-            debug={false}
-          />
-          <p className="scanner-instructions">
-            Point your camera at a Metri wallet QR code to scan the wallet
-            address
-          </p>
-        </>
-      ) : (
-        <>
-          <div className="mb-8">
-            <button onClick={handleOpenScanner} className="scan-button">
-              Scan QR Code
+  // Render the Group Tab Content
+  const renderGroupTab = () => {
+    return (
+      <div className="tab-content">
+        {/* Group Selection Dropdown */}
+        <div className="group-selection-container">
+          {loadingGroups ? (
+            <div className="loading-indicator">Loading groups...</div>
+          ) : (
+            <select
+              id="group-select"
+              value={selectedGroup?.id || ""}
+              onChange={handleGroupChange}
+              className="group-select-dropdown"
+              disabled={loadingGroups}
+            >
+              {availableGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name} ({group.address.substring(0, 6)}...
+                  {group.address.substring(38)})
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* Ownership Status */}
+        {walletConnected && (
+          <div
+            className={`ownership-status ${
+              !isCorrectNetwork
+                ? "warning"
+                : canAddToGroup()
+                  ? "success"
+                  : "error"
+            }`}
+          >
+            {getOwnershipStatusText()}
+          </div>
+        )}
+
+        {/* Owner Mode Toggle */}
+        <div className="owner-mode-toggle">
+          <div className="flex justify-center gap-4">
+            <button
+              className={`mode-button ${ownerMode === "direct" ? "active" : ""}`}
+              onClick={() => setOwnerMode("direct")}
+            >
+              Direct Owner
+            </button>
+            <button
+              className={`mode-button ${ownerMode === "safe" ? "active" : ""}`}
+              onClick={() => setOwnerMode("safe")}
+            >
+              Safe Owner
             </button>
           </div>
+        </div>
 
-          <div className="mt-6 pb-6 border-b border-gray-300">
+        {/* Wallet Connection Section */}
+        <div className="wallet-connection">
+          {walletConnected ? (
+            <div className="text-center">
+              <p className="text-green-600 font-bold">✓ Wallet Connected</p>
+            </div>
+          ) : (
+            <button
+              onClick={connectWallet}
+              disabled={isLoading}
+              className="connect-wallet-button"
+            >
+              {isLoading ? "Connecting..." : "Connect Wallet"}
+            </button>
+          )}
+        </div>
+
+        {/* Auto-Group Toggle */}
+        <div className="auto-toggle-container">
+          <div className="auto-execute-toggle">
+            <span className="toggle-label">Auto-Add to Group:</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={autoGroup}
+                onChange={() => setAutoGroup(!autoGroup)}
+                disabled={!canAddToGroup()}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        {/* Network Warning - only show if on wrong network */}
+        {walletConnected && !isCorrectNetwork && (
+          <div className="network-warning">
+            <button
+              onClick={switchToGnosisChain}
+              className="switch-network-button"
+            >
+              Switch to Gnosis Chain
+            </button>
+          </div>
+        )}
+        {/* Display address and action buttons */}
+        {scannedAddress && (
+          <div className="address-display">
+            <div className="action-buttons-container">
+              <button
+                onClick={() => addToGroup(scannedAddress)}
+                disabled={
+                  !walletConnected ||
+                  processingGroup ||
+                  !isCorrectNetwork ||
+                  (ownerMode === "safe" && !safeClient) ||
+                  !selectedGroup
+                }
+                className="action-button group-button"
+              >
+                {processingGroup
+                  ? "Processing..."
+                  : ownerMode === "direct"
+                    ? "Add to Group"
+                    : "Add via Safe"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Transaction success message */}
+        {txHash && (
+          <div className="success-box">
+            <h3>✅ Address Added to Group</h3>
+            <p className="break-all text-xs">{txHash}</p>
+            <a
+              href={`https://gnosisscan.io/tx/${txHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="view-tx-button"
+            >
+              View Transaction
+            </a>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="App">
+      <h1>Circles Onboarding Helper</h1>
+
+      {/* Main scan button - always visible at the top */}
+      <div className="scan-button-container">
+        <button onClick={handleOpenScanner} className="scan-button">
+          Scan QR Code
+        </button>
+      </div>
+
+      {/* Tab Navigation */}
+      <div className="tab-navigation">
+        <div className="flex border-b">
+          <button
+            className={`tab-button ${activeTab === "invite" ? "active" : ""}`}
+            onClick={() => setActiveTab("invite")}
+          >
+            Invite
+          </button>
+          <button
+            className={`tab-button ${activeTab === "group" ? "active" : ""}`}
+            onClick={() => setActiveTab("group")}
+          >
+            Add to Group
+          </button>
+        </div>
+      </div>
+
+      {/* QR Scanner or Manual Input */}
+      {showScanner ? (
+        <QRCodeScanner
+          onScan={handleScan}
+          onClose={handleCloseScanner}
+          debug={false}
+        />
+      ) : (
+        <>
+          {/* Manual address input field */}
+          <div className="input-container">
             <input
               type="text"
               placeholder="Enter Wallet Address (0x...)"
@@ -778,61 +1026,13 @@ function App() {
               className="wallet-input"
             />
           </div>
+
+          {/* Display any errors */}
+          {errorInfo && <p className="error-message">{errorInfo}</p>}
+
+          {/* Render active tab content */}
+          {activeTab === "invite" ? renderInviteTab() : renderGroupTab()}
         </>
-      )}
-
-      {errorInfo && <p className="error-message">{errorInfo}</p>}
-
-      {/* Display address and action buttons (always visible when address is available) */}
-      {scannedAddress && (
-        <div className="address-display mt-6">
-          <h3>Wallet Address</h3>
-          <p className="break-all">{scannedAddress}</p>
-
-          <div className="action-buttons-container mt-4">
-            <button
-              onClick={() => createTallyUrl(scannedAddress)}
-              className="action-button tally-button"
-              disabled={processingTally}
-            >
-              {processingTally ? "Opening..." : "Open Tally Form"}
-            </button>
-
-            <button
-              onClick={() => addToGroup(scannedAddress)}
-              disabled={
-                !walletConnected ||
-                processingGroup ||
-                !isCorrectNetwork ||
-                (ownerMode === "safe" && !safeClient)
-              }
-              className="action-button group-button"
-            >
-              {processingGroup
-                ? "Processing..."
-                : ownerMode === "direct"
-                  ? "Add to Group"
-                  : "Add via Safe"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Transaction success message */}
-      {txHash && (
-        <div className="success-box mt-4">
-          <h3>✅ Address Added to Group</h3>
-          <p>Transaction Hash:</p>
-          <p className="break-all text-xs">{txHash}</p>
-          <a
-            href={`https://gnosisscan.io/tx/${txHash}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="view-tx-button mt-4"
-          >
-            View Transaction
-          </a>
-        </div>
       )}
     </div>
   );

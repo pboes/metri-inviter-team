@@ -93,13 +93,14 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({
                   deviceId: selectedDeviceId
                     ? { exact: selectedDeviceId }
                     : undefined,
+                  facingMode: "environment", // Prefer back camera
                 },
               }}
             />
           )}
-          {/* Scanning frame */}
+          {/* Scanning frame with improved visibility */}
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-3/4 h-3/4 border-2 border-[#FFB800] rounded-lg"></div>
+            <div className="w-3/4 h-3/4 border-4 border-[#10b981] rounded-lg"></div>
           </div>
         </div>
 
@@ -111,7 +112,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({
 
         <button
           onClick={onClose}
-          className="w-full py-3 bg-[#FFB800] hover:bg-[#E6A600] text-black font-medium rounded-lg transition-colors"
+          className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium rounded-lg transition-colors"
         >
           Cancel
         </button>
