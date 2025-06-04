@@ -1,5 +1,5 @@
-// src/polyfills.ts
 import { Buffer } from "buffer";
 
-window.global = window;
+// Don't manually set window.global or window.ethereum
+// Only set Buffer which is needed
 window.Buffer = Buffer;
