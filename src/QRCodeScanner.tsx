@@ -13,313 +13,68 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({
   debug = false,
 }) => {
   const [error, setError] = useState<string | null>(null);
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
 
+  useEffect(() => {
+    // Simple camera setup - just try to get the back camera
+    const setupCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+        });
+
+        // Get the device ID from the active stream
+        const videoTracks = stream.getVideoTracks();
+        if (videoTracks.length > 0) {
+          setSelectedDeviceId(videoTracks[0].getSettings().deviceId || null);
+          setCameraReady(true);
+        }
+
+        // Clean up the stream we just created
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err) {
+        console.error("Camera access error:", err);
+        setError("Could not access camera. Please check permissions.");
+      }
+    };
+
+    setupCamera();
+  }, []);
+
   const handleScan = (data: { text: string } | null) => {
     if (data && data.text) {
-      console.log("QR Code scanned:", data.text);
-
-      // For debugging purposes, show the raw QR code content
       if (debug) {
-        setError(
-          `Raw QR code content: ${data.text.substring(0, 100)}${data.text.length > 100 ? "..." : ""}`,
-        );
+        console.log("QR Code scanned:", data.text);
       }
 
-      let address = data.text;
+      // Extract Ethereum address using a simple regex
+      const ethAddressRegex = /(0x[a-fA-F0-9]{40})/i;
+      const match = data.text.match(ethAddressRegex);
 
-      // Try to extract wallet address from QR code data
-      // Handle different formats:
-
-      // 1. Direct Ethereum address
-      const ethAddressRegex = /^0x[a-fA-F0-9]{40}$/i;
-
-      // 2. Metri wallet format - based on the image, it might contain the address in a specific section
-      // Look for wallet address in the QR code content
-      const metriWalletRegex = /Wallet Address\s*[:=]?\s*(0x[a-fA-F0-9]{40})/i;
-      const metriMatch = data.text.match(metriWalletRegex);
-
-      if (metriMatch && metriMatch[1]) {
-        // Extract address from Metri wallet format
-        address = metriMatch[1];
-        console.log("Extracted address from Metri wallet format:", address);
-      }
-
-      // 3. Look for any Ethereum address pattern in the text
-      if (!ethAddressRegex.test(address)) {
-        const anyEthAddressRegex = /(0x[a-fA-F0-9]{40})/i;
-        const anyMatch = data.text.match(anyEthAddressRegex);
-        if (anyMatch && anyMatch[1]) {
-          address = anyMatch[1];
-          console.log("Extracted address from general text:", address);
+      if (match && match[1]) {
+        const address = match[1];
+        if (debug) {
+          console.log("Extracted address:", address);
         }
-      }
-
-      // 4. JSON format (some QR codes might contain JSON with address)
-      if (!ethAddressRegex.test(address)) {
-        try {
-          const jsonData = JSON.parse(data.text);
-          if (jsonData.address && ethAddressRegex.test(jsonData.address)) {
-            address = jsonData.address;
-            console.log("Extracted address from JSON format:", address);
-          } else if (jsonData.wallet && ethAddressRegex.test(jsonData.wallet)) {
-            address = jsonData.wallet;
-            console.log("Extracted wallet from JSON format:", address);
-          } else {
-            // Try to find any property that looks like an Ethereum address
-            for (const key in jsonData) {
-              if (
-                typeof jsonData[key] === "string" &&
-                ethAddressRegex.test(jsonData[key])
-              ) {
-                address = jsonData[key];
-                console.log(
-                  `Extracted address from JSON property ${key}:`,
-                  address,
-                );
-                break;
-              }
-            }
-          }
-        } catch (e) {
-          // Not JSON format, continue with other checks
-          console.log("Not a valid JSON format:", e);
-        }
-      }
-
-      // 5. URL format with address parameter or path component
-      if (!ethAddressRegex.test(address)) {
-        try {
-          // Check URL parameters
-          const url = new URL(data.text);
-          const urlAddress =
-            url.searchParams.get("address") ||
-            url.searchParams.get("wallet") ||
-            url.searchParams.get("a");
-
-          if (urlAddress && ethAddressRegex.test(urlAddress)) {
-            address = urlAddress;
-            console.log("Extracted address from URL parameter:", address);
-          } else {
-            // Check if address is in the path
-            const pathParts = url.pathname.split("/");
-            for (const part of pathParts) {
-              if (ethAddressRegex.test(part)) {
-                address = part;
-                console.log("Extracted address from URL path:", address);
-                break;
-              }
-            }
-          }
-        } catch (e) {
-          // Not URL format, continue with other checks
-          console.log("Not a valid URL format:", e);
-        }
-      }
-
-      // 6. Handle Metri profile URL directly
-      if (
-        !ethAddressRegex.test(address) &&
-        data.text.includes("app.metri.xyz/p/profile/")
-      ) {
-        try {
-          const metriProfileRegex =
-            /app\.metri\.xyz\/p\/profile\/(0x[a-fA-F0-9]{40})/i;
-          const metriProfileMatch = data.text.match(metriProfileRegex);
-          if (metriProfileMatch && metriProfileMatch[1]) {
-            address = metriProfileMatch[1];
-            console.log("Extracted address from Metri profile URL:", address);
-          }
-        } catch (e) {
-          console.log("Error parsing Metri profile URL:", e);
-        }
-      }
-
-      // Final validation
-      if (ethAddressRegex.test(address)) {
         onScan(address);
       } else {
-        console.error("Could not extract valid wallet address from QR code");
-        setError(
-          "Could not find a valid wallet address in the QR code. Raw content: " +
-            data.text.substring(0, 50) +
-            "...",
-        );
+        setError("No Ethereum address found in QR code");
       }
     }
   };
 
-  // Get available camera devices
-  useEffect(() => {
-    const getDevices = async () => {
-      try {
-        console.log("Requesting camera permission...");
-
-        // First, try to directly access the back camera
-        try {
-          await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: { facingMode: "environment" },
-          });
-          console.log("Successfully requested environment-facing camera");
-        } catch (err) {
-          console.log(
-            "Couldn't access environment camera directly, falling back to general permission",
-          );
-          // Fall back to general camera permission
-          await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: true,
-          });
-        }
-
-        // Get the list of available devices
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(
-          (device) => device.kind === "videoinput",
-        );
-
-        if (videoDevices.length === 0) {
-          throw new Error("No camera devices found");
-        }
-
-        setDevices(videoDevices);
-
-        // Log all available cameras for debugging
-        videoDevices.forEach((device, index) => {
-          console.log(
-            `Camera ${index + 1}:`,
-            device.label || `Camera ${index + 1}`,
-          );
-        });
-
-        // Smart camera selection that prioritizes back cameras
-        let selectedCamera = null;
-
-        // Priority 1: Find any camera with "back" in the name (most reliable method)
-        const backCamera = videoDevices.find((device) => {
-          const label = device.label.toLowerCase();
-          return label.includes("back");
-        });
-
-        if (backCamera) {
-          selectedCamera = backCamera;
-          console.log(
-            "Selected camera with 'back' in name:",
-            selectedCamera.label,
-          );
-        }
-
-        // Priority 2: Find camera with related terms like "rear" or "environment"
-        if (!selectedCamera) {
-          const alternativeBackCamera = videoDevices.find((device) => {
-            const label = device.label.toLowerCase();
-            return label.includes("rear") || label.includes("environment");
-          });
-
-          if (alternativeBackCamera) {
-            selectedCamera = alternativeBackCamera;
-            console.log(
-              "Selected camera with 'rear' or 'environment' in name:",
-              selectedCamera.label,
-            );
-          }
-        }
-
-        // Priority 3: Use device-specific heuristics for mobile and tablets
-        if (!selectedCamera) {
-          const isMobileOrTablet =
-            /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-              navigator.userAgent,
-            );
-          const isIPad = /iPad/i.test(navigator.userAgent);
-
-          if (isMobileOrTablet) {
-            // On most mobile devices with exactly 2 cameras
-            if (videoDevices.length === 2) {
-              // For most Android and iOS devices, the back camera is index 1 (second camera)
-              selectedCamera = videoDevices[1];
-              console.log(
-                "Mobile device with 2 cameras - selected second camera (likely back):",
-                selectedCamera.label,
-              );
-            }
-            // For devices with more than 2 cameras (modern phones often have multiple back cameras)
-            else if (videoDevices.length > 2) {
-              // Try the second camera first (most common for the main back camera)
-              selectedCamera = videoDevices[1];
-              console.log(
-                "Mobile device with multiple cameras - selected camera at index 1:",
-                selectedCamera.label,
-              );
-            }
-          }
-
-          // Special case for iPad, which might have different camera ordering
-          if (isIPad && videoDevices.length >= 2) {
-            // On iPad, the back camera is typically at index 1
-            selectedCamera = videoDevices[1];
-            console.log(
-              "iPad detected - selected camera at index 1:",
-              selectedCamera.label,
-            );
-          }
-        }
-
-        // Final fallback: If no back camera found with any method, use the first camera
-        if (!selectedCamera && videoDevices.length > 0) {
-          selectedCamera = videoDevices[0];
-          console.log(
-            "No back camera identified, defaulting to first camera:",
-            selectedCamera.label,
-          );
-        }
-
-        // Set the selected device
-        if (selectedCamera) {
-          setSelectedDeviceId(selectedCamera.deviceId);
-          setCameraReady(true);
-        } else {
-          throw new Error("Could not determine an appropriate camera to use");
-        }
-      } catch (error) {
-        console.error("Error getting camera devices:", error);
-        setError(
-          "Error accessing camera: " +
-            (error instanceof Error ? error.message : String(error)),
-        );
-      }
-    };
-
-    getDevices();
-  }, []);
-
   const handleError = (err: Error) => {
     console.error("QR Scanner error:", err);
-    setError("Error accessing camera: " + err.message);
-  };
-
-  const changeCamera = (deviceId: string) => {
-    setSelectedDeviceId(deviceId);
-    setError(null);
-    setCameraReady(false);
-    setTimeout(() => setCameraReady(true), 100);
+    setError("Scanner error: " + err.message);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div className="bg-white rounded-lg p-4 w-full max-w-md mx-4">
-        <h3 className="text-xl font-bold mb-4 text-center">Scan QR Code</h3>
-
-        <p className="text-sm text-gray-600 mb-2 text-center">
-          {devices.length === 0
-            ? "Accessing camera..."
-            : selectedDeviceId
-              ? `Using: ${devices.find((d) => d.deviceId === selectedDeviceId)?.label || "Selected camera"}`
-              : "No camera selected"}
-        </p>
+        <h3 className="text-xl font-bold mb-4 text-center">
+          Scan Metri Wallet QR Code
+        </h3>
 
         <div className="w-full aspect-square relative bg-gray-100 overflow-hidden rounded-lg mb-4">
           {cameraReady && selectedDeviceId && (
@@ -332,17 +87,17 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({
                 height: "100%",
                 objectFit: "cover",
               }}
-              constraints={
-                {
-                  video: selectedDeviceId
-                    ? { deviceId: { exact: selectedDeviceId } }
-                    : true, // fallback to default camera
-                  audio: false,
-                } as MediaTrackConstraints
-              }
+              constraints={{
+                audio: false,
+                video: {
+                  deviceId: selectedDeviceId
+                    ? { exact: selectedDeviceId }
+                    : undefined,
+                },
+              }}
             />
           )}
-          {/* Overlay with scanning frame */}
+          {/* Scanning frame */}
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-3/4 h-3/4 border-2 border-[#FFB800] rounded-lg"></div>
           </div>
@@ -351,29 +106,6 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
             {error}
-          </div>
-        )}
-
-        {devices.length > 0 && (
-          <div className="mb-4">
-            <p className="text-sm font-medium mb-1">
-              Camera not working? Try another:
-            </p>
-            <select
-              value={selectedDeviceId || ""}
-              onChange={(e) => changeCamera(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded-md text-sm"
-            >
-              {devices.map((device, index) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label || `Camera ${index + 1}`}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-500 mt-1">
-              Note: If scanning doesn't work, try the front camera. Some devices
-              label cameras incorrectly.
-            </p>
           </div>
         )}
 
