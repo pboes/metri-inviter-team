@@ -1,0 +1,35 @@
+# General exclusions (apply to all directories)
+node_modules
+dist
+.cache
+.DS_Store
+/contracts
+/contracts/*
+
+# Keep essential project files
+!package-lock.json
+!yarn.lock
+!pnpm-lock.yaml
+
+# Allow specific app folders
+!staff-app/
+!end-user-app/
+
+# Build outputs
+dist
+dist-ssr
+
+# Vite specific
+.vite/
+.vite_opt_cache/
+.env
+.env
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
