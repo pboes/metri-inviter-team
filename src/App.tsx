@@ -33,7 +33,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
-  const [tallyUrl, setTallyUrl] = useState<string | null>(null);
+  // const [tallyUrl, setTallyUrl] = useState<string | null>(null);
   const [provider, setProvider] = useState<ethers.Provider | null>(null);
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
   const [walletConnected, setWalletConnected] = useState(false);
@@ -47,7 +47,7 @@ function App() {
   const [isDirectOwner, setIsDirectOwner] = useState(false);
   const [isSafeOwner, setIsSafeOwner] = useState(false);
   const [isSafeGroupOwner, setIsSafeGroupOwner] = useState(false);
-  const [currentNetworkId, setCurrentNetworkId] = useState<number | null>(null);
+  // const [currentNetworkId, setCurrentNetworkId] = useState<number | null>(null);
   const [isCorrectNetwork, setIsCorrectNetwork] = useState(false);
   const [safeThreshold, setSafeThreshold] = useState<number>(1);
   const [safeClient, setSafeClient] = useState<any>(null);
@@ -226,7 +226,7 @@ function App() {
             method: "eth_chainId",
           });
           const networkId = parseInt(chainId, 16);
-          setCurrentNetworkId(networkId);
+          // setCurrentNetworkId(networkId);
           setIsCorrectNetwork(networkId === GNOSIS_CHAIN_ID);
 
           // Setup provider based on network
@@ -258,7 +258,7 @@ function App() {
           }
 
           // Listen for network changes
-          window.ethereum.on("chainChanged", (chainId: string) => {
+          window.ethereum.on("chainChanged", (_chainId: string) => {
             window.location.reload();
           });
         } catch (error) {
@@ -366,7 +366,7 @@ function App() {
     try {
       const baseUrl = "https://tally.so/r/wv1k10";
       const fullUrl = `${baseUrl}?address=${encodeURIComponent(address)}`;
-      setTallyUrl(fullUrl);
+      // setTallyUrl(fullUrl);
 
       // Open the URL in a new tab
       window.open(fullUrl, "_blank");
@@ -559,7 +559,7 @@ function App() {
   const handleOpenScanner = () => {
     // Reset any previous errors and data
     setErrorInfo(null);
-    setTallyUrl(null);
+    // setTallyUrl(null);
     setTxHash(null);
     setScannedAddress(null);
     setShowScanner(true);

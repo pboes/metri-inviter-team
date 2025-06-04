@@ -1,12 +1,12 @@
-declare module 'react-qr-scanner' {
-  import React from 'react';
+declare module "react-qr-scanner" {
+  import React from "react";
 
   interface QrScannerProps {
     delay?: number;
     style?: React.CSSProperties;
     onError: (error: Error) => void;
     onScan: (data: { text: string } | null) => void;
-    constraints?: MediaTrackConstraints;
+    constraints?: MediaStreamConstraints;
     resolution?: number;
     facingMode?: string;
     chooseDeviceId?: () => string;
