@@ -45,6 +45,7 @@ function App() {
   const [walletConnected, setWalletConnected] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [scannedAddress, setScannedAddress] = useState<string | null>(null);
+  const [contextInput, setContextInput] = useState("");
 
   // Tab and mode states
   const [activeTab, setActiveTab] = useState<Tab>("invite");
@@ -193,7 +194,14 @@ function App() {
       // Fetch trusted groups from the truster (Circles organization)
       const trustedGroups = await fetchTrustedGroups(DEFAULT_SAFE_ADDRESS);
 
-      if (trustedGroups.length === 0) {
+      // Filter out the backers group address (case insensitive)
+      const filteredGroups = trustedGroups.filter(
+        (address) =>
+          address.toLowerCase() !==
+          "0x1aca75e38263c79d9d4f10df0635cc6fcfe6f026",
+      );
+
+      if (filteredGroups.length === 0) {
         // If no trusted groups found, add a fallback group
         setAvailableGroups([
           {
@@ -214,7 +222,7 @@ function App() {
 
       // Process each group to get name and owner
       const groupsWithDetails = await Promise.all(
-        trustedGroups.map(async (address, index) => {
+        filteredGroups.map(async (address, index) => {
           // Get the group owner
           const owner = await getGroupOwner(address, rpcProvider);
 
@@ -526,7 +534,11 @@ function App() {
 
     try {
       const baseUrl = "https://tally.so/r/wv1k10";
-      const fullUrl = `${baseUrl}?address=${encodeURIComponent(address)}`;
+      // Include the context parameter if it's not empty
+      const contextParam = contextInput
+        ? `&context=${encodeURIComponent(contextInput)}`
+        : "";
+      const fullUrl = `${baseUrl}?address=${encodeURIComponent(address)}${contextParam}`;
 
       // Always open the URL in a new tab when the button is clicked
       window.open(fullUrl, "_blank");
@@ -538,6 +550,11 @@ function App() {
     } finally {
       setProcessingTally(false);
     }
+  };
+
+  // Add a handler for the context input
+  const handleContextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setContextInput(e.target.value);
   };
 
   // Function to add address to group directly
@@ -794,6 +811,16 @@ function App() {
   const renderInviteTab = () => {
     return (
       <div className="tab-content">
+        <div className="input-container">
+          <input
+            type="text"
+            placeholder="Context (optional)"
+            value={contextInput}
+            onChange={handleContextChange}
+            className="wallet-input"
+          />
+        </div>
+
         <div className="auto-toggle-container">
           <div className="auto-execute-toggle">
             <span className="toggle-label">Auto-Invite:</span>
