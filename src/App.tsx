@@ -8,7 +8,6 @@ const GNOSIS_RPC_URL = "https://rpc.gnosischain.com";
 const IS_HUMAN_CONTRACT = "0xc12C1E50ABB450d6205Ea2C3Fa861b3B834d13e8";
 const BACKEND_URL =
   "https://group-addition-endpoint-kpgul.ondigitalocean.app/add-to-group";
-const APP_SECRET = import.meta.env.VITE_APP_SECRET || "";
 const GROUP_ADDRESS = "0x43322ADF67D969219d014D60C860966269F4F93E";
 
 // Contract ABI for isHuman and isTrusted checks
@@ -40,7 +39,7 @@ function App() {
   // Function to create a hash for secure backend communication
   const createSecurityHash = (address: string, secret: string) => {
     return ethers.keccak256(
-      ethers.toUtf8Bytes(`${address.toLowerCase()}${secret}${APP_SECRET}`),
+      ethers.toUtf8Bytes(`${address.toLowerCase()}${secret}`),
     );
   };
 
