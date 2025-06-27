@@ -6,8 +6,7 @@ import QRCodeScanner from "./QRCodeScanner";
 // Constants
 const GNOSIS_RPC_URL = "https://rpc.gnosischain.com";
 const IS_HUMAN_CONTRACT = "0xc12C1E50ABB450d6205Ea2C3Fa861b3B834d13e8";
-const BACKEND_URL =
-  "https://group-addition-endpoint-kpgul.ondigitalocean.app/add-to-group";
+const BACKEND_URL = "http://localhost:3000/add-to-group";
 const GROUP_ADDRESS = "0x43322ADF67D969219d014D60C860966269F4F93E";
 
 // Contract ABI for isHuman and isTrusted checks
@@ -29,6 +28,8 @@ function App() {
   const [isGroupMember, setIsGroupMember] = useState(false);
   const [tallyFormOpened, setTallyFormOpened] = useState(false);
   const [provider, setProvider] = useState<ethers.Provider | null>(null);
+  // New state for group addition toggle
+  const [enableGroupAddition, setEnableGroupAddition] = useState(true);
 
   // Initialize provider
   useEffect(() => {
@@ -115,8 +116,8 @@ function App() {
 
       let backendSuccess = true;
 
-      // 2. Send to backend for group addition if not already a member
-      if (!isGroupMember) {
+      // 2. Send to backend for group addition if not already a member and the toggle is enabled
+      if (!isGroupMember && enableGroupAddition) {
         try {
           const securityHash = createSecurityHash(address, secretKey);
 
@@ -152,8 +153,8 @@ function App() {
         openTallyForm(address);
       }
 
-      // Only show success if backend operation succeeded
-      if (backendSuccess) {
+      // Only show success if backend operation succeeded or if group addition was disabled
+      if (backendSuccess || !enableGroupAddition) {
         setIsSuccess(true);
       }
     } catch (error) {
@@ -215,8 +216,40 @@ function App() {
         />
       </div>
 
-      {/* Manual Address Input */}
-      <div className="input-container">
+      {/* Group Addition Toggle */}
+      <div className="toggle-container">
+        <label className="toggle-label">
+          <input
+            type="checkbox"
+            checked={enableGroupAddition}
+            onChange={(e) => setEnableGroupAddition(e.target.checked)}
+          />
+          <span className="toggle-text">Enable Group Addition</span>
+        </label>
+      </div>
+
+      {/* Scan Button - Moved up in the order */}
+      <div className="scan-button-container">
+        <button
+          onClick={handleOpenScanner}
+          className="scan-button"
+          disabled={isProcessing || !secretKey.trim()}
+        >
+          {isProcessing ? "Processing..." : "Scan QR Code"}
+        </button>
+      </div>
+
+      {/* Scanner */}
+      {showScanner && (
+        <QRCodeScanner
+          onScan={handleScan}
+          onClose={() => setShowScanner(false)}
+          debug={false}
+        />
+      )}
+
+      {/* Manual Address Input - Moved down in the order */}
+      <div className="input-container manual-input">
         <form onSubmit={handleManualSubmit}>
           <input
             type="text"
@@ -237,26 +270,6 @@ function App() {
         </form>
       </div>
 
-      {/* Scan Button */}
-      <div className="scan-button-container">
-        <button
-          onClick={handleOpenScanner}
-          className="scan-button"
-          disabled={isProcessing || !secretKey.trim()}
-        >
-          {isProcessing ? "Processing..." : "Scan QR Code"}
-        </button>
-      </div>
-
-      {/* Scanner */}
-      {showScanner && (
-        <QRCodeScanner
-          onScan={handleScan}
-          onClose={() => setShowScanner(false)}
-          debug={false}
-        />
-      )}
-
       {/* Status Messages */}
       {errorInfo && <p className="error-message">{errorInfo}</p>}
 
@@ -266,8 +279,11 @@ function App() {
           {!isHumanStatus && tallyFormOpened && (
             <p>The Tally form has been opened in a new tab.</p>
           )}
-          {isHumanStatus && !isGroupMember && (
+          {isHumanStatus && !isGroupMember && enableGroupAddition && (
             <p>Address added to the group.</p>
+          )}
+          {isHumanStatus && !isGroupMember && !enableGroupAddition && (
+            <p>Group addition was disabled. Address not added to group.</p>
           )}
         </div>
       )}
