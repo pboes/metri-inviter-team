@@ -6,7 +6,8 @@ import QRCodeScanner from "./QRCodeScanner";
 // Constants
 const GNOSIS_RPC_URL = "https://rpc.gnosischain.com";
 const IS_HUMAN_CONTRACT = "0xc12C1E50ABB450d6205Ea2C3Fa861b3B834d13e8";
-const BACKEND_URL = "http://localhost:3000/add-to-group";
+const BACKEND_URL =
+  "https://group-addition-endpoint-kpgul.ondigitalocean.app/add-to-group";
 const GROUP_ADDRESS = "0x43322ADF67D969219d014D60C860966269F4F93E";
 
 // Contract ABI for isHuman and isTrusted checks
