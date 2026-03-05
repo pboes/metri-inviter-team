@@ -48,19 +48,8 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({
         console.log("QR Code scanned:", data.text);
       }
 
-      // Extract Ethereum address using a simple regex
-      const ethAddressRegex = /(0x[a-fA-F0-9]{40})/i;
-      const match = data.text.match(ethAddressRegex);
-
-      if (match && match[1]) {
-        const address = match[1];
-        if (debug) {
-          console.log("Extracted address:", address);
-        }
-        onScan(address);
-      } else {
-        setError("No Ethereum address found in QR code");
-      }
+      // Pass the raw scanned text to the parent — address extraction happens there
+      onScan(data.text);
     }
   };
 
@@ -73,7 +62,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div className="bg-white rounded-lg p-4 w-full max-w-md mx-4">
         <h3 className="text-xl font-bold mb-4 text-center">
-          Scan Metri Wallet QR Code
+          Scan Gnosis Profile QR Code
         </h3>
 
         <div className="w-full aspect-square relative bg-gray-100 overflow-hidden rounded-lg mb-4">
